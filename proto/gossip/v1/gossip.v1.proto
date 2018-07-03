@@ -28,14 +28,15 @@ message MembersUpdate {
 
 message Member {
     string name = 1;
-    string address = 2;
+    string host = 2;
+    int32 port = 3;
     uint64 index = 4;
-    int64 start_time = 5;
+    uint64 heartbeat = 5;
+    int64 start_time = 6;
 }
 
 message Heartbeat {
-    string name = 1;
-    uint64 index = 3;
+    Member originator = 1;
 }
 
 message JoinRequest {
@@ -43,7 +44,7 @@ message JoinRequest {
 }
 
 message JoinResponse {
-    string originator_addres = 1;
+    string originator_host = 1;
     uint64 cluster_index = 2;
     repeated Member members = 3;
 }

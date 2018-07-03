@@ -35,11 +35,6 @@ func main() {
 	grpcServer := grpc.NewServer()
 	reflection.Register(grpcServer)
 
-	nodeName := petname.Generate(2, "-")
-	node := cluster.NewNode(nodeName)
-
-	gossip.RegisterGossipServer(grpcServer, node.GossipServer)
-
 	listener, err := net.Listen("tcp", hostAddr)
 
 	if err != nil {
@@ -47,7 +42,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	nodeName := petname.Generate(2, "-")
+	nodePort := listener.Addr().(*net.TCPAddr).Port
+	node := cluster.NewNode(nodeName, uint16(nodePort))
+
 	log.Printf("started node %s at %s\n", nodeName, hostAddr)
+
+	gossip.RegisterGossipServer(grpcServer, node.GossipServer)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
