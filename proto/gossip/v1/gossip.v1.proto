@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package gossip.v1;
+
+import "google/protobuf/empty.proto";
+
+
+service Gossip {
+    rpc PullMembers (PullMembersRequest) returns (PullMembersResponse) {}
+    rpc PushHeartbeat(Heartbeat) returns (google.protobuf.Empty) {}
+    rpc PushMembersUpdate(MembersUpdate) returns (google.protobuf.Empty) {}
+    rpc Join(JoinRequest) returns (JoinResponse) {}
+}
+
+message PullMembersRequest {
+
+}
+
+message PullMembersResponse {
+    string name = 1;
+    repeated Member members = 2;
+}
+
+message MembersUpdate {
+    string name = 1;
+    repeated Member members = 2;
+}
+
+message Member {
+    string name = 1;
+    string address = 2;
+    uint64 index = 4;
+    int64 start_time = 5;
+}
+
+message Heartbeat {
+    string name = 1;
+    uint64 index = 3;
+}
+
+message JoinRequest {
+    Member origiator = 1;
+}
+
+message JoinResponse {
+    string originator_addres = 1;
+    uint64 cluster_index = 2;
+    repeated Member members = 3;
+}
