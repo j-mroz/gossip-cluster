@@ -74,7 +74,7 @@ func (n *Node) updateHeartbeat(newHeartbeat uint64) {
 func (n *Node) runHeartbeatLoop() {
 	for {
 		time.Sleep(heartbeatTime)
-		log.Println("runHeartbeatLoop", atomic.LoadUint64(&n.self.Heartbeat))
+		log.Println("Heartbeat:", atomic.LoadUint64(&n.self.Heartbeat))
 		n.runHeartbeatActions()
 	}
 }
@@ -90,43 +90,21 @@ func (n *Node) runFailureDetector() {
 }
 
 func (n *Node) runGossipDisseminator() {
+	var updateMessage *gossip.MembersUpdate
+	var gossipPeers []*Member
+
 	n.members.ReadTransaction(func(members []*Member) {
-		n.sendGossips(members)
+		updateMessage = n.makeMembersUpdateMessage(members)
+		gossipPeers = n.pickGossipGroup(members)
 	})
+
+	n.sendGossips(gossipPeers, updateMessage)
 }
 
-func (n *Node) sendGossips(members []*Member) {
-	update := n.makeMembersUpdate(members)
-	gossipPeers := n.pickGossipGroup(members)
-
-	for _, peerIndex := range gossipPeers {
-		if members[peerIndex].Name == n.self.Name {
-			continue
-		}
-		remote := members[peerIndex].Address()
-		n.sendMembersUpdate(remote, update)
-	}
-}
-
-func (n *Node) makeMembersUpdate(members []*Member) *gossip.MembersUpdate {
-	update := &gossip.MembersUpdate{
-		Name:    n.self.Name,
-		Members: mapToGossipMembers(members),
-	}
-	update.Members = append(update.Members, mapToGossipMember(n.self))
-	return update
-}
-
-func (n *Node) sendMembersUpdate(remote string, update *gossip.MembersUpdate) {
-	n.connectAndDo(remote, func(remoteNode gossip.GossipClient) {
-		remoteNode.PushMembersUpdate(context.Background(), update)
-	})
-}
-
-func (n *Node) pickGossipGroup(members []*Member) []int {
+func (n *Node) pickGossipGroup(members []*Member) []*Member {
 	membersCount := len(members)
 	if membersCount == 0 {
-		return []int{}
+		return []*Member{}
 	}
 
 	indices := rand.Perm(membersCount)
@@ -138,7 +116,43 @@ func (n *Node) pickGossipGroup(members []*Member) []int {
 		gossipRange++
 	}
 
-	return indices[:gossipRange]
+	gossipPeers := make([]*Member, 0, gossipRange)
+	for _, peerIndex := range indices[:gossipRange] {
+
+		// Should not happen, but just in case.
+		if members[peerIndex].Name == n.self.Name {
+			continue
+		}
+
+		memberCopy := new(Member)
+		*memberCopy = *members[peerIndex]
+		gossipPeers = append(gossipPeers, memberCopy)
+	}
+
+	return gossipPeers
+}
+
+func (n *Node) makeMembersUpdateMessage(members []*Member) *gossip.MembersUpdate {
+	update := &gossip.MembersUpdate{
+		Name:             n.self.Name,
+		ClusterHeartbeat: atomic.LoadUint64(&n.self.Heartbeat),
+		Members:          mapToGossipMembers(members),
+	}
+	update.Members = append(update.Members, mapToGossipMember(n.self))
+	return update
+}
+
+func (n *Node) sendGossips(gossipPeers []*Member, updateMessage *gossip.MembersUpdate) {
+	for _, peer := range gossipPeers {
+		remote := peer.Address()
+		n.sendMembersUpdate(remote, updateMessage)
+	}
+}
+
+func (n *Node) sendMembersUpdate(remote string, update *gossip.MembersUpdate) {
+	n.connectAndDo(remote, func(remoteNode gossip.GossipClient) {
+		remoteNode.PushMembersUpdate(context.Background(), update)
+	})
 }
 
 func (n *Node) connectAndDo(remote string, op func(client gossip.GossipClient)) {

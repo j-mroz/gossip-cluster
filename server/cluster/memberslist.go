@@ -1,7 +1,6 @@
 package cluster
 
 import (
-	"fmt"
 	"sync"
 )
 
@@ -24,7 +23,6 @@ func (l *MembersList) ReadTransaction(tx func(members []*Member)) {
 }
 
 func (l *MembersList) UpdateTransaction(tx func(members *[]*Member)) {
-	fmt.Println("UpdateTransaction")
 	l.membersMu.Lock()
 	defer l.membersMu.Unlock()
 	tx(&l.members)

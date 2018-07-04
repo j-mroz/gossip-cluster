@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"reflect"
+	"strings"
 
 	"github.com/golang/protobuf/ptypes/empty"
 	gossip "github.com/j-mroz/gossip-cluster/proto/gossip/v1"
@@ -38,6 +39,9 @@ func (s GossipServer) Join(ctx context.Context, req *gossip.JoinRequest) (*gossi
 }
 
 func logRequest(req interface{}) {
-	bytes, _ := json.Marshal(req)
-	log.Println("recv:", reflect.TypeOf(req), string(bytes))
+	bytes, _ := json.MarshalIndent(req, "", "  ")
+	typeInfo := reflect.TypeOf(req)
+	typeNameParts := strings.Split(typeInfo.String(), ".")
+	msgType := typeNameParts[len(typeNameParts)-1]
+	log.Println("recv:", msgType, string(bytes))
 }
