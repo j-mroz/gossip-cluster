@@ -18,7 +18,37 @@ import (
 	"github.com/j-mroz/gossip-cluster/server/cluster"
 )
 
+func listInterfacesAdresses() {
+	handleError := func(err error) {
+		if err != nil {
+			log.Println("Failed to list interfaces, error:", err)
+			os.Exit(1)
+		}
+	}
+
+	interfaces, err := net.Interfaces()
+	handleError(err)
+
+	for _, ifc := range interfaces {
+		addrs, err := ifc.Addrs()
+		handleError(err)
+
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			log.Println("Avilable ip:", ip)
+		}
+	}
+}
+
 func main() {
+	log.SetPrefix("[gossip-node] ")
+
 	var joinAddr, hostAddr string
 	flag.StringVar(&joinAddr, "join", "", "cluster node to join")
 	flag.StringVar(&hostAddr, "host", "", "this node")
@@ -28,6 +58,8 @@ func main() {
 		fmt.Println("Usage: gossip-cluster -host=[<addr>]:<port> [-join=[<addr>]:<port>]")
 		os.Exit(1)
 	}
+
+	listInterfacesAdresses()
 
 	rand.Seed(time.Now().UTC().UnixNano())
 
@@ -45,7 +77,7 @@ func main() {
 	nodePort := listener.Addr().(*net.TCPAddr).Port
 	node := cluster.NewNode(nodeName, uint16(nodePort))
 
-	log.Printf("started node %s at %s\n", nodeName, hostAddr)
+	log.Printf("Started node %s at %s\n", nodeName, hostAddr)
 
 	gossip.RegisterGossipServer(grpcServer, node.GossipServer)
 
