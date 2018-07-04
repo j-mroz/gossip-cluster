@@ -74,8 +74,14 @@ func main() {
 	}
 
 	nodeName := petname.Generate(2, "-")
+	nodeIP := listener.Addr().(*net.TCPAddr).IP
+	var nodeHost string
+	if !nodeIP.IsUnspecified() {
+		nodeHost = nodeIP.String()
+	}
 	nodePort := listener.Addr().(*net.TCPAddr).Port
-	node := cluster.NewNode(nodeName, uint16(nodePort))
+
+	node := cluster.NewNode(nodeName, nodeHost, uint16(nodePort))
 
 	log.Printf("Started node %s at %s\n", nodeName, hostAddr)
 
@@ -91,7 +97,14 @@ func main() {
 	}()
 
 	if joinAddr != "" {
-		node.RequestJoin(joinAddr)
+		for i := 0; i < 3; i++ {
+			if err := node.RequestJoin(joinAddr); err == nil {
+				break
+			}
+			log.Println("Join failed, will retry once more in few seconds")
+			sleepTime := 1 + int(rand.Int31n(7))
+			time.Sleep(time.Duration(sleepTime) * time.Second)
+		}
 	}
 	wg.Wait()
 

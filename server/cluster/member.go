@@ -14,8 +14,6 @@ type Member struct {
 
 type MemberKey struct {
 	Name string
-	Host string
-	Port uint16
 }
 
 func (m *Member) Address() string {

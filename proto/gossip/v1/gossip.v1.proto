@@ -13,8 +13,9 @@ service Gossip {
 }
 
 message PullMembersRequest {
-
+    // Empty message.
 }
+
 
 message PullMembersResponse {
     string name = 1;
@@ -23,7 +24,6 @@ message PullMembersResponse {
 
 message MembersUpdate {
     string name = 1;
-//    int64 cluster_heartbeat = 2;
     repeated Member members = 3;
 }
 
@@ -42,10 +42,11 @@ message Heartbeat {
 
 message JoinRequest {
     Member origiator = 1;
+    string destination_host = 2;
+
 }
 
 message JoinResponse {
     string originator_host = 1;
-//    uint64 cluster_heartbeat = 2;
     repeated Member members = 3;
 }

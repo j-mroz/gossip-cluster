@@ -8,7 +8,7 @@ import (
 	"math"
 	"math/rand"
 	"net"
-	"os"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -35,11 +35,13 @@ type Node struct {
 }
 
 // NewNode creates new Node instance
-func NewNode(name string, port uint16) *Node {
+func NewNode(name string, host string, port uint16) *Node {
 	self := &Member{
 		Name:      name,
+		Host:      host,
 		Port:      port,
-		StartTime: time.Now().Unix(),
+		Timestamp: time.Now().UnixNano(),
+		StartTime: time.Now().UnixNano(),
 	}
 
 	node := &Node{
@@ -47,6 +49,10 @@ func NewNode(name string, port uint16) *Node {
 		self:    self,
 	}
 	node.GossipServer = GossipServer{node}
+
+	node.members.UpdateTransaction(func(members *[]*Member) {
+		node.addMember(members, self)
+	})
 
 	go node.runHeartbeatLoop()
 	return node
@@ -99,7 +105,7 @@ func (n *Node) markAndSweepFailedMembers(members *[]*Member, timestamp int64) {
 func (n *Node) markIfFailed(member *Member, timestamp int64) {
 	if !member.Stale && member.hasFailed(timestamp) {
 		member.Stale = true
-		log.Println("Member", member.Name, "went stale")
+		log.Println("Member", member.Name, "went stale", member.Timestamp, "<", timestamp)
 	}
 }
 
@@ -134,6 +140,12 @@ func (n *Node) runGossipDisseminator() {
 		updateMessage = n.makeMembersUpdateMessage(members)
 		gossipPeers = n.pickGossipGroup(members)
 	})
+
+	log.Print("Gossip peers [")
+	for _, peer := range gossipPeers {
+		log.Print(peer.Name + ",")
+	}
+	log.Println("]")
 
 	n.sendGossips(gossipPeers, updateMessage)
 }
@@ -172,9 +184,8 @@ func (n *Node) pickGossipGroup(members []*Member) []*Member {
 func (n *Node) makeMembersUpdateMessage(members []*Member) *gossip.MembersUpdate {
 	update := &gossip.MembersUpdate{
 		Name:    n.self.Name,
-		Members: mapToGossipMembers(members),
+		Members: getNonStaleMembersForGossip(members),
 	}
-	update.Members = append(update.Members, mapToGossipMember(n.self))
 	return update
 }
 
@@ -234,34 +245,6 @@ func (n *Node) handlePushMembersUpdate(ctx context.Context, update *gossip.Membe
 	return &empty.Empty{}, nil
 }
 
-func (n *Node) RequestJoin(remote string) {
-
-	log.Println("Attempting to join cluster, connecting ", remote)
-
-	n.connectAndDo(remote, func(remoteNode gossip.GossipClient) {
-		request := &gossip.JoinRequest{
-			Origiator: mapToGossipMember(n.self),
-		}
-		response, joinErr := remoteNode.Join(context.Background(), request)
-		if joinErr != nil {
-			log.Printf("Join error: %s\n", joinErr.Error())
-			os.Exit(1)
-		}
-		logRequest(response)
-		if response.Members == nil || len(response.Members) == 0 {
-			log.Println("Join returned empty members list")
-			os.Exit(1)
-		}
-
-		log.Println("Discovered self host: ", response.OriginatorHost)
-		n.self.Host = response.OriginatorHost
-
-		n.updateMembers(response.GetMembers())
-
-		log.Println("Connected ", remote, ", successfully joined cluster using node")
-	})
-}
-
 func (n *Node) updateMembers(gmembers []*gossip.Member) {
 	n.members.UpdateTransaction(func(members *[]*Member) {
 		n.updateMembersImpl(members, gmembers)
@@ -273,12 +256,12 @@ func (n *Node) updateMembersImpl(members *[]*Member, gmembers []*gossip.Member) 
 	// Save references to original member in a map for faster lookups.
 	membersMap := make(map[MemberKey]*Member)
 	for _, member := range *members {
-		key := MemberKey{Name: member.Name, Host: member.Host, Port: member.Port}
+		key := MemberKey{Name: member.Name}
 		membersMap[key] = member
 	}
 
 	for _, gmember := range gmembers {
-		key := MemberKey{Name: gmember.Name, Host: gmember.Host, Port: uint16(gmember.Port)}
+		key := MemberKey{Name: gmember.Name}
 		if member, ok := membersMap[key]; ok {
 			n.updateMember(member, gmember)
 		} else if gmember.Name != n.self.Name {
@@ -291,13 +274,51 @@ func (n *Node) updateMember(member *Member, gmember *gossip.Member) {
 	if member.Timestamp <= gmember.Timestamp {
 		member.Timestamp = gmember.Timestamp
 		member.Index = gmember.Index
+		member.Host = gmember.Host
+		member.Port = uint16(gmember.Port)
 		member.Stale = false
 	}
 }
 
 func (n *Node) addMember(members *[]*Member, newMember *Member) {
-	log.Println("Add ", newMember.Name, "to cluster")
+	log.Println("Add", newMember.Name, "to cluster")
 	*members = append(*members, newMember)
+}
+
+func (n *Node) RequestJoin(remote string) error {
+
+	log.Println("Attempting to join cluster, connecting ", remote)
+
+	var connectErr error
+
+	n.connectAndDo(remote, func(remoteNode gossip.GossipClient) {
+		remoteHost, _ := splitAddr(remote)
+		request := &gossip.JoinRequest{
+			Origiator:       mapToGossipMember(n.self),
+			DestinationHost: remoteHost,
+		}
+		response, joinErr := remoteNode.Join(context.Background(), request)
+		if joinErr != nil {
+			log.Printf("Join error: %s\n", joinErr.Error())
+			connectErr = joinErr
+			return
+		}
+		logRequest(response)
+		if response.Members == nil || len(response.Members) == 0 {
+			log.Println("Join returned empty members list")
+			connectErr = errors.New("Join returned empty members list")
+			return
+		}
+
+		log.Println("Discovered self host: ", response.OriginatorHost)
+		n.self.Host = response.OriginatorHost
+
+		n.updateMembers(response.GetMembers())
+
+		log.Println("Connected", remote, "and successfully joined cluster")
+	})
+
+	return connectErr
 }
 
 func (n *Node) handleJoin(ctx context.Context, request *gossip.JoinRequest) (*gossip.JoinResponse, error) {
@@ -310,12 +331,15 @@ func (n *Node) handleJoin(ctx context.Context, request *gossip.JoinRequest) (*go
 		OriginatorHost: newMember.Host,
 	}
 
+	// TODO: possible race and lack of memory barrier, fix it
+	if n.self.Host == "" {
+		n.self.Host = request.DestinationHost
+	}
+
 	n.members.UpdateTransaction(func(members *[]*Member) {
 		response.Members = getNonStaleMembersForGossip(*members)
-		*members = append(*members, newMember)
+		n.addMember(members, newMember)
 	})
-
-	response.Members = append(response.Members, mapToGossipMember(n.self))
 
 	return response, nil
 }
@@ -367,9 +391,22 @@ func (n *Node) makeNewMember(ctx context.Context, request *gossip.JoinRequest) (
 
 func findMember(members []*Member, wanted *Member) (int, *Member) {
 	for index, member := range members {
-		if member.Host == wanted.Host && member.Port == wanted.Port && member.Name == wanted.Name {
+		if member.Name == wanted.Name {
 			return index, member
 		}
 	}
 	return -1, nil
+}
+
+func splitAddr(remote string) (string, int) {
+	for idx := len(remote) - 1; idx >= 0; idx-- {
+		if remote[idx] == ':' {
+			port, err := strconv.Atoi(remote[idx+1:])
+			if err != nil {
+				break
+			}
+			return remote[:idx], port
+		}
+	}
+	return "", -1
 }
