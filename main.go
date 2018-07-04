@@ -1,22 +1,21 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"math/rand"
 	"net"
 	"os"
+	"sync"
 	"time"
 
-	"sync"
-
-	"flag"
-
 	"github.com/dustinkirkland/golang-petname"
-	gossip "github.com/j-mroz/gossip-cluster/proto/gossip/v1"
-	"github.com/j-mroz/gossip-cluster/server/cluster"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
+
+	gossip "github.com/j-mroz/gossip-cluster/proto/gossip/v1"
+	"github.com/j-mroz/gossip-cluster/server/cluster"
 )
 
 func main() {
