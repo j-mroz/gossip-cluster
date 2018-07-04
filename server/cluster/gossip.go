@@ -39,9 +39,11 @@ func (s GossipServer) Join(ctx context.Context, req *gossip.JoinRequest) (*gossi
 }
 
 func logRequest(req interface{}) {
-	bytes, _ := json.MarshalIndent(req, "", "  ")
+	bytes, _ := json.MarshalIndent(req, ">", "  ")
+	//bytes, _ := json.Marshal(req)
+
 	typeInfo := reflect.TypeOf(req)
 	typeNameParts := strings.Split(typeInfo.String(), ".")
 	msgType := typeNameParts[len(typeNameParts)-1]
-	log.Println("recv:", msgType, string(bytes))
+	log.Println("Recv:", msgType, string(bytes))
 }

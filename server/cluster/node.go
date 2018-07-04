@@ -20,8 +20,10 @@ import (
 )
 
 const (
-	heartbeatTime  = 2 * time.Second
-	connectTimeout = 2 * time.Second
+	heartbeatTime       = 1 * time.Second
+	connectTimeout      = 3 * time.Second
+	memberFailTimeout   = 5 * time.Second
+	memberRemoveTimeout = 20 * time.Second
 )
 
 // Node represents cluster node.
@@ -55,17 +57,11 @@ func (n *Node) advanceIndex() {
 	atomic.AddUint64(&n.self.Index, 1)
 }
 
-func (n *Node) advanceHeartbeat() {
-	atomic.AddUint64(&n.self.Heartbeat, 1)
-}
-
-func (n *Node) updateHeartbeat(newHeartbeat uint64) {
+func (n *Node) advanceTimestamp() {
+	newTimestamp := time.Now().UnixNano()
 	for {
-		currentHeartbeat := atomic.LoadUint64(&n.self.Heartbeat)
-		if currentHeartbeat >= newHeartbeat {
-			break
-		}
-		if atomic.CompareAndSwapUint64(&n.self.Heartbeat, currentHeartbeat, newHeartbeat) {
+		currentTimestamp := atomic.LoadInt64(&n.self.Timestamp)
+		if atomic.CompareAndSwapInt64(&n.self.Timestamp, currentTimestamp, newTimestamp) {
 			break
 		}
 	}
@@ -74,19 +70,60 @@ func (n *Node) updateHeartbeat(newHeartbeat uint64) {
 func (n *Node) runHeartbeatLoop() {
 	for {
 		time.Sleep(heartbeatTime)
-		log.Println("Heartbeat:", atomic.LoadUint64(&n.self.Heartbeat))
 		n.runHeartbeatActions()
 	}
 }
 
 func (n *Node) runHeartbeatActions() {
-	n.advanceHeartbeat()
+	n.advanceTimestamp()
 	n.runGossipDisseminator()
 	n.runFailureDetector()
 }
 
 func (n *Node) runFailureDetector() {
-	// TODO
+	timestamp := atomic.LoadInt64(&n.self.Timestamp)
+	n.members.UpdateTransaction(func(members *[]*Member) {
+		n.markAndSweepFailedMembers(members, timestamp)
+	})
+}
+
+func (n *Node) markAndSweepFailedMembers(members *[]*Member, timestamp int64) {
+	eraseStart := 0
+	for _, member := range *members {
+		n.markIfFailed(member, timestamp)
+		n.removeIfHardFailed(members, member, timestamp, &eraseStart)
+	}
+	n.eraseRemoved(members, eraseStart)
+}
+
+func (n *Node) markIfFailed(member *Member, timestamp int64) {
+	if !member.Stale && member.hasFailed(timestamp) {
+		member.Stale = true
+		log.Println("Member", member.Name, "went stale")
+	}
+}
+
+func (m Member) hasFailed(timestamp int64) bool {
+	return timestamp-m.Timestamp >= memberFailTimeout.Nanoseconds()
+}
+
+func (n *Node) removeIfHardFailed(members *[]*Member, member *Member, timestamp int64, eraseStart *int) {
+	if !member.hasReachedHardLimit(timestamp) {
+		(*members)[*eraseStart] = member
+		*eraseStart++
+	} else {
+		log.Println("Member", member.Name, "reached hard stale limit, removing")
+	}
+}
+
+func (m Member) hasReachedHardLimit(timestamp int64) bool {
+	return timestamp-m.Timestamp >= memberRemoveTimeout.Nanoseconds()
+}
+
+func (n *Node) eraseRemoved(members *[]*Member, eraseStart int) {
+	if eraseStart < len(*members) {
+		*members = (*members)[:eraseStart]
+	}
 }
 
 func (n *Node) runGossipDisseminator() {
@@ -134,9 +171,8 @@ func (n *Node) pickGossipGroup(members []*Member) []*Member {
 
 func (n *Node) makeMembersUpdateMessage(members []*Member) *gossip.MembersUpdate {
 	update := &gossip.MembersUpdate{
-		Name:             n.self.Name,
-		ClusterHeartbeat: atomic.LoadUint64(&n.self.Heartbeat),
-		Members:          mapToGossipMembers(members),
+		Name:    n.self.Name,
+		Members: mapToGossipMembers(members),
 	}
 	update.Members = append(update.Members, mapToGossipMember(n.self))
 	return update
@@ -177,36 +213,6 @@ func (n *Node) handlePullMembers(context.Context, *gossip.PullMembersRequest) (*
 	return response, nil
 }
 
-func mapToGossipMembers(members []*Member) (gossipMembers []*gossip.Member) {
-	gossipMembers = make([]*gossip.Member, 0, len(members))
-	for _, member := range members {
-		gossipMembers = append(gossipMembers, mapToGossipMember(member))
-	}
-	return gossipMembers
-}
-
-func mapToGossipMember(member *Member) *gossip.Member {
-	return &gossip.Member{
-		Name:      member.Name,
-		Host:      member.Host,
-		Port:      int32(member.Port),
-		Heartbeat: member.Heartbeat,
-		Index:     member.Index,
-		StartTime: member.StartTime,
-	}
-}
-
-func mapToMember(gmember *gossip.Member) *Member {
-	return &Member{
-		Name:      gmember.Name,
-		Host:      gmember.Host,
-		Port:      uint16(gmember.Port),
-		Heartbeat: gmember.Heartbeat,
-		Index:     gmember.Index,
-		StartTime: gmember.StartTime,
-	}
-}
-
 func (n *Node) handlePushHeartbeat(ctx context.Context, heartbeat *gossip.Heartbeat) (*empty.Empty, error) {
 	var txErr error
 
@@ -215,7 +221,7 @@ func (n *Node) handlePushHeartbeat(ctx context.Context, heartbeat *gossip.Heartb
 		if member == nil {
 			txErr = errors.New("disconnected from cluster")
 		} else {
-			member.Heartbeat = heartbeat.Originator.Heartbeat
+			member.Timestamp = heartbeat.Originator.Timestamp
 			member.Stale = false
 		}
 	})
@@ -224,7 +230,6 @@ func (n *Node) handlePushHeartbeat(ctx context.Context, heartbeat *gossip.Heartb
 }
 
 func (n *Node) handlePushMembersUpdate(ctx context.Context, update *gossip.MembersUpdate) (*empty.Empty, error) {
-	n.updateHeartbeat(update.ClusterHeartbeat)
 	n.updateMembers(update.GetMembers())
 	return &empty.Empty{}, nil
 }
@@ -249,10 +254,7 @@ func (n *Node) RequestJoin(remote string) {
 		}
 
 		log.Println("Discovered self host: ", response.OriginatorHost)
-		log.Printf("Drifted heartbeat from %v to %v", n.self.Heartbeat, response.ClusterHeartbeat)
-
 		n.self.Host = response.OriginatorHost
-		n.self.Index = response.ClusterHeartbeat
 
 		n.updateMembers(response.GetMembers())
 
@@ -278,21 +280,50 @@ func (n *Node) updateMembersImpl(members *[]*Member, gmembers []*gossip.Member) 
 	for _, gmember := range gmembers {
 		key := MemberKey{Name: gmember.Name, Host: gmember.Host, Port: uint16(gmember.Port)}
 		if member, ok := membersMap[key]; ok {
-			updateMember(member, gmember)
+			n.updateMember(member, gmember)
 		} else if gmember.Name != n.self.Name {
-			*members = append(*members, mapToMember(gmember))
+			n.addMember(members, mapToMember(gmember))
 		}
 	}
 }
 
-func updateMember(member *Member, gmember *gossip.Member) {
-	if member.Heartbeat <= gmember.Heartbeat {
-		member.Heartbeat = gmember.Heartbeat
+func (n *Node) updateMember(member *Member, gmember *gossip.Member) {
+	if member.Timestamp <= gmember.Timestamp {
+		member.Timestamp = gmember.Timestamp
 		member.Index = gmember.Index
 		member.Stale = false
-	} else {
-		// TODO
 	}
+}
+
+func (n *Node) addMember(members *[]*Member, newMember *Member) {
+	log.Println("Add ", newMember.Name, "to cluster")
+	*members = append(*members, newMember)
+}
+
+func (n *Node) handleJoin(ctx context.Context, request *gossip.JoinRequest) (*gossip.JoinResponse, error) {
+	newMember, err := n.makeNewMember(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	response := &gossip.JoinResponse{
+		OriginatorHost: newMember.Host,
+	}
+
+	n.members.UpdateTransaction(func(members *[]*Member) {
+		response.Members = getNonStaleMembersForGossip(*members)
+		*members = append(*members, newMember)
+	})
+
+	response.Members = append(response.Members, mapToGossipMember(n.self))
+
+	return response, nil
+}
+
+func getNonStaleMembersForGossip(members []*Member) []*gossip.Member {
+	return filterAndMapToGossipMembers(members, func(member *Member) bool {
+		return !member.Stale
+	})
 }
 
 func connectClient(remote string) (client gossip.GossipClient, conn *grpc.ClientConn, err error) {
@@ -304,28 +335,6 @@ func connectClient(remote string) (client gossip.GossipClient, conn *grpc.Client
 	}
 	client = gossip.NewGossipClient(conn)
 	return
-}
-
-func (n *Node) handleJoin(ctx context.Context, request *gossip.JoinRequest) (*gossip.JoinResponse, error) {
-	n.updateHeartbeat(request.Origiator.Heartbeat)
-	newMember, err := n.makeNewMember(ctx, request)
-	if err != nil {
-		return nil, err
-	}
-
-	response := &gossip.JoinResponse{
-		OriginatorHost:   newMember.Host,
-		ClusterHeartbeat: n.self.Heartbeat,
-	}
-
-	n.members.UpdateTransaction(func(members *[]*Member) {
-		response.Members = mapToGossipMembers(*members)
-		*members = append(*members, newMember)
-	})
-
-	response.Members = append(response.Members, mapToGossipMember(n.self))
-
-	return response, nil
 }
 
 func (n *Node) makeNewMember(ctx context.Context, request *gossip.JoinRequest) (*Member, error) {

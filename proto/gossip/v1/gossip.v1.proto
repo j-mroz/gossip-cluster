@@ -23,7 +23,7 @@ message PullMembersResponse {
 
 message MembersUpdate {
     string name = 1;
-    uint64 cluster_heartbeat = 2;
+//    int64 cluster_heartbeat = 2;
     repeated Member members = 3;
 }
 
@@ -32,7 +32,7 @@ message Member {
     string host = 2;
     int32 port = 3;
     uint64 index = 4;
-    uint64 heartbeat = 5;
+    int64 timestamp = 5;
     int64 start_time = 6;
 }
 
@@ -46,6 +46,6 @@ message JoinRequest {
 
 message JoinResponse {
     string originator_host = 1;
-    uint64 cluster_heartbeat = 2;
+//    uint64 cluster_heartbeat = 2;
     repeated Member members = 3;
 }

@@ -7,7 +7,7 @@ type Member struct {
 	Host      string
 	Port      uint16
 	Index     uint64
-	Heartbeat uint64
+	Timestamp int64
 	StartTime int64
 	Stale     bool
 }
