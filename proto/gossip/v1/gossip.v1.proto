@@ -16,7 +16,6 @@ message PullMembersRequest {
     // Empty message.
 }
 
-
 message PullMembersResponse {
     string name = 1;
     repeated Member members = 2;

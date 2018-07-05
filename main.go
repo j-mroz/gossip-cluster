@@ -63,8 +63,8 @@ func main() {
 
 	rand.Seed(time.Now().UTC().UnixNano())
 
-	grpcServer := grpc.NewServer()
-	reflection.Register(grpcServer)
+	// grpcServer := grpc.NewServer()
+	// reflection.Register(grpcServer)
 
 	listener, err := net.Listen("tcp", hostAddr)
 
@@ -85,6 +85,8 @@ func main() {
 
 	log.Printf("Started node %s at %s\n", nodeName, hostAddr)
 
+	grpcServer := grpc.NewServer()
+	reflection.Register(grpcServer)
 	gossip.RegisterGossipServer(grpcServer, node.GossipServer)
 
 	var wg sync.WaitGroup

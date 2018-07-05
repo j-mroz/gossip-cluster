@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -20,10 +21,10 @@ import (
 )
 
 const (
-	heartbeatTime       = 1 * time.Second
+	heartbeatTime       = 2 * time.Second
 	connectTimeout      = 3 * time.Second
-	memberFailTimeout   = 5 * time.Second
-	memberRemoveTimeout = 20 * time.Second
+	memberFailTimeout   = 8 * time.Second
+	memberRemoveTimeout = 24 * time.Second
 )
 
 // Node represents cluster node.
@@ -141,11 +142,12 @@ func (n *Node) runGossipDisseminator() {
 		gossipPeers = n.pickGossipGroup(members)
 	})
 
-	log.Print("Gossip peers [")
+	sb := strings.Builder{}
 	for _, peer := range gossipPeers {
-		log.Print(peer.Name + ",")
+		sb.WriteString(peer.Name)
+		sb.WriteString(", ")
 	}
-	log.Println("]")
+	log.Print("Sending gossip to", sb.String())
 
 	n.sendGossips(gossipPeers, updateMessage)
 }

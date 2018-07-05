@@ -2,5 +2,5 @@
 
 dep ensure
 go build
-docker build . -t gossip_cluster:latest
+docker build . -t jmroz/gossip_cluster:latest
 
