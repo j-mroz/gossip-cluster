@@ -1,0 +1,58 @@
+version: "3.3"
+
+services:
+  node0:
+    hostname: node0
+    image: jmroz/gossip_cluster:latest
+    entrypoint: /root/gossip-node -host=:7913
+    ports:
+      - "2000:7913"
+
+  node1:
+    hostname: node1
+    image: jmroz/gossip_cluster:latest
+    entrypoint: /root/gossip-node -host=:7913 -join=node0:7913
+    ports:
+      - "2001:7913"
+
+  node2:
+    hostname: node2
+    image: jmroz/gossip_cluster:latest
+    entrypoint: /root/gossip-node -host=:7913 -join=node1:7913
+    ports:
+      - "2002:7913"
+
+  node3:
+    hostname: node3
+    image: jmroz/gossip_cluster:latest
+    entrypoint: /root/gossip-node -host=:7913 -join=node2:7913
+
+  node4:
+    hostname: node4
+    image: jmroz/gossip_cluster:latest
+    entrypoint: /root/gossip-node -host=:7913 -join=node3:7913
+
+  node5:
+    hostname: node5
+    image: jmroz/gossip_cluster:latest
+    entrypoint: /root/gossip-node -host=:7913 -join=node4:7913
+
+  node6:
+    hostname: node6
+    image: jmroz/gossip_cluster:latest
+    entrypoint: /root/gossip-node -host=:7913 -join=node5:7913
+
+  node7:
+    hostname: node7
+    image: jmroz/gossip_cluster:latest
+    entrypoint: /root/gossip-node -host=:7913 -join=node6:7913
+
+  node8:
+    hostname: node8
+    image: jmroz/gossip_cluster:latest
+    entrypoint: /root/gossip-node -host=:7913 -join=node7:7913
+
+  node9:
+    hostname: node9
+    image: jmroz/gossip_cluster:latest
+    entrypoint: /root/gossip-node -host=:7913 -join=node8:7913
